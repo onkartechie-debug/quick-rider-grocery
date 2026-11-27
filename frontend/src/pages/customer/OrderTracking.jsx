@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, MapPin, Phone, Receipt, RefreshCw, Store } from 'lucide-react';
+import { ArrowLeft, Ban, CreditCard, MapPin, Phone, Receipt, RefreshCw, Store } from 'lucide-react';
 import { customerApi } from '../../api/customerApi.js';
 import { errorMessage } from '../../api/axiosClient.js';
 import useAsync from '../../hooks/useAsync.js';
@@ -13,10 +13,14 @@ import StatusBadge from '../../components/common/StatusBadge.jsx';
 import StatusTracker from '../../components/common/StatusTracker.jsx';
 import { EmptyState } from '../../components/common/Feedback.jsx';
 import { PageLoader } from '../../components/common/Spinner.jsx';
-import { ACTIVE_STATUSES, ORDER_STATUS_META, PAYMENT_METHODS } from '../../utils/constants.js';
+import { ACTIVE_STATUSES, ORDER_STATUS_META, PAYMENT_METHODS, PAYMENT_STATUS_META } from '../../utils/constants.js';
 import { formatCurrency, formatDateTime } from '../../utils/format.js';
+import { RAZORPAY_TEST_HINT } from '../../utils/razorpay.js';
+import useRazorpayPayment from '../../hooks/useRazorpayPayment.js';
 
 const POLL_MS = 15000;
+/** Mirrors the backend's app.razorpay.pending-payment-expiry-minutes (default 20). */
+const PAYMENT_WINDOW_MINUTES = 20;
 
 export default function OrderTracking() {
   const { orderId } = useParams();
@@ -25,6 +29,7 @@ export default function OrderTracking() {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [reason, setReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  const { pay, paying, testMode } = useRazorpayPayment();
 
   const isActive = order && ACTIVE_STATUSES.includes(order.status);
   useInterval(reload, isActive ? POLL_MS : null);
@@ -61,6 +66,16 @@ export default function OrderTracking() {
   };
 
   const payment = PAYMENT_METHODS.find((p) => p.value === order.paymentMethod)?.label || order.paymentMethod;
+  const paymentStatus = PAYMENT_STATUS_META[order.paymentStatus];
+  const awaitingPayment = order.status === 'AWAITING_PAYMENT';
+  const canCancel = order.status === 'PLACED' || awaitingPayment;
+
+  const payNow = async () => {
+    const result = await pay(order.id, order.paymentMethod);
+    if (result.order) setData(result.order);
+    if (result.outcome === 'paid') toast.success('Payment received! Your order has been sent to the shop.');
+    else toast.error(result.message || 'Payment was not completed.');
+  };
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -84,6 +99,25 @@ export default function OrderTracking() {
             )}
           </div>
         </div>
+        {awaitingPayment && (
+          <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm">
+                <p className="font-semibold text-orange-900">
+                  {order.paymentStatus === 'FAILED' ? 'Your last payment attempt failed' : 'Payment pending'}
+                </p>
+                {order.paymentFailureReason && <p className="mt-0.5 text-orange-800">{order.paymentFailureReason}</p>}
+                <p className="mt-0.5 text-orange-700">
+                  Pay within {PAYMENT_WINDOW_MINUTES} minutes of placing the order, or it will be cancelled automatically.
+                </p>
+              </div>
+              <Button icon={CreditCard} loading={paying} onClick={payNow}>
+                Pay {formatCurrency(order.totalAmount)}
+              </Button>
+            </div>
+            {testMode && <p className="mt-3 text-xs text-orange-700">{RAZORPAY_TEST_HINT}</p>}
+          </div>
+        )}
         <div className="mt-6">
           <StatusTracker status={order.status} history={order.history} cancelReason={order.cancelReason} />
         </div>
@@ -117,6 +151,18 @@ export default function OrderTracking() {
               <dt>Total ({payment})</dt>
               <dd className="tabular-nums">{formatCurrency(order.totalAmount)}</dd>
             </div>
+            {paymentStatus && (
+              <div className="flex items-center justify-between text-xs">
+                <dt className="text-slate-500">Payment</dt>
+                <dd className={`rounded-full px-2 py-0.5 font-semibold ${paymentStatus.className}`}>
+                  {order.paymentStatus === 'PENDING' && order.paymentMethod === 'COD' ? 'Pay on delivery' : paymentStatus.label}
+                  {order.paidAt && order.paymentStatus === 'PAID' ? ` · ${formatDateTime(order.paidAt)}` : ''}
+                </dd>
+              </div>
+            )}
+            {order.paymentStatus === 'REFUND_PENDING' && (
+              <p className="text-xs text-amber-700">Your online payment will be refunded to the original payment method.</p>
+            )}
           </dl>
         </section>
 
@@ -144,7 +190,7 @@ export default function OrderTracking() {
             {order.notes && <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-600">Note: {order.notes}</p>}
           </div>
 
-          {order.status === 'PLACED' && (
+          {canCancel && (
             <Button variant="danger-soft" icon={Ban} className="w-full" onClick={() => setConfirmCancel(true)}>
               Cancel order
             </Button>
@@ -160,7 +206,11 @@ export default function OrderTracking() {
         variant="danger"
         title="Cancel this order?"
         confirmLabel="Cancel order"
-        message="You can cancel until the shop accepts your order."
+        message={
+          order.paymentStatus === 'PAID'
+            ? 'You can cancel until the shop accepts your order. Your online payment will be refunded.'
+            : 'You can cancel until the shop accepts your order.'
+        }
       >
         <TextArea label="Reason (optional)" name="reason" className="mt-4" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
       </ConfirmDialog>

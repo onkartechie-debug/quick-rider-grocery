@@ -114,3 +114,19 @@ cd backend && mvn spring-boot:run
 cd frontend && npm install && npm run dev
 ```
 Env overrides: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET` (Base64, ≥ 256-bit), `COOKIE_SECURE`, `CORS_ORIGINS`.
+
+## 6. Payments, SMS and OTP login
+
+* **Razorpay (UPI / CARD):** the order is created as `AWAITING_PAYMENT` (stock reserved, hidden from the shop), the
+  customer pays in Razorpay Checkout, and the backend marks it `PAID` + `PLACED` after verifying the signature
+  (`/api/customer/orders/{id}/payment/verify`) **or** a signed webhook (`POST /api/public/payments/razorpay/webhook`,
+  events `payment.captured`, `payment.failed`, `order.paid`). Unpaid orders are cancelled after
+  `PAYMENT_EXPIRY_MINUTES` (default 20) once Razorpay confirms they were not paid. A paid order that is cancelled
+  becomes `REFUND_PENDING`; refund it from the Razorpay dashboard. COD is unchanged and becomes `PAID` on delivery.
+  Defaults are Razorpay **test** keys. In other environments set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET`.
+  Test payments: UPI `success@razorpay`, or card `4111 1111 1111 1111` with any future expiry and any CVV.
+* **SMS (mytoday BulkSms):** order notifications (placed/paid, accepted, out for delivery, delivered, cancelled)
+  and login OTPs. `SMS_ENABLED=false` (the default) logs messages to the console instead. To send real SMS, set `SMS_ENABLED=true`
+  and `SMS_FEED_ID`, `SMS_USERNAME`, `SMS_PASSWORD`, `SMS_JOB_NAME`. Indian DLT rules require the message templates to be registered.
+* **OTP login:** `POST /api/auth/otp/request` then `POST /api/auth/otp/verify`, on the "Mobile OTP" tab of the login page.
+  The dev master OTP is **`111111`** (`MASTER_OTP`). **Set `MASTER_OTP=` (empty) in every shared or production environment.**

@@ -63,6 +63,40 @@ app:
       path: /
     cors:
       allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
+  razorpay:
+    # Razorpay TEST mode credentials (dev environment) - no real money moves. Override all three via
+    # env vars in every other environment; LIVE keys (rzp_live_...) must only ever come from env vars.
+    # key-id is handed to the browser for Checkout.js; key-secret and webhook-secret never leave the backend.
+    key-id: ${RAZORPAY_KEY_ID:rzp_test_YpeuqwvvTh0xzG}
+    key-secret: ${RAZORPAY_KEY_SECRET:aiCAYsYUgj5lRITZQ9wIOePg}
+    # Razorpay dashboard (Test mode) -> Settings -> Webhooks secret - a different credential from key-secret,
+    # used to verify X-Razorpay-Signature on POST /api/public/payments/razorpay/webhook.
+    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:b377ef56d51ac9e7f8606ba69a08313fa04e4c03c50c7b144688de5fb48c452b}
+    api-base-url: ${RAZORPAY_API_BASE_URL:https://api.razorpay.com/v1}
+    merchant-name: ${RAZORPAY_MERCHANT_NAME:QuickRider}
+    # Online (UPI/CARD) orders reserve stock while AWAITING_PAYMENT; unpaid ones are cancelled after this.
+    pending-payment-expiry-minutes: ${PAYMENT_EXPIRY_MINUTES:20}
+    expiry-check-interval-ms: ${PAYMENT_EXPIRY_CHECK_MS:60000}
+  sms:
+    # Order SMS notifications. Disabled by default: ConsoleSmsSender logs messages instead of sending.
+    # When enabling, provide the gateway credentials via env vars only - they have NO defaults on purpose,
+    # so a missing value fails startup instead of sending with a bogus credential.
+    enabled: ${SMS_ENABLED:false}
+    base-url: ${SMS_BASE_URL:https://bulkpush.mytoday.com}
+    feed-id: ${SMS_FEED_ID:}
+    username: ${SMS_USERNAME:}
+    password: ${SMS_PASSWORD:}
+    job-name: ${SMS_JOB_NAME:}
+    sender-suffix: ${SMS_SENDER_SUFFIX:- QuickRider}
+  otp:
+    # Login-by-OTP over SMS. master-otp is a DEV/TEST convenience that is accepted for any registered
+    # mobile number - set MASTER_OTP to an empty value in every shared/production environment.
+    master-otp: ${MASTER_OTP:111111}
+    length: 6
+    expiration-minutes: ${OTP_EXPIRATION_MINUTES:5}
+    max-attempts: 5
+    resend-cooldown-seconds: 30
+    max-per-hour: 5
 
 management:
   endpoints:

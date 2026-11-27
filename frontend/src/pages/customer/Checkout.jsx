@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, CheckCircle2, MapPin, Plus, Wallet } from 'lucide-react';
+import { AlertCircle, ArrowLeft, CheckCircle2, MapPin, Plus, ShieldCheck, Wallet } from 'lucide-react';
 import { customerApi } from '../../api/customerApi.js';
 import { errorMessage } from '../../api/axiosClient.js';
 import useAsync from '../../hooks/useAsync.js';
@@ -13,7 +13,9 @@ import { PageHeader } from '../../components/common/Feedback.jsx';
 import Spinner from '../../components/common/Spinner.jsx';
 import AddressFormModal from '../../components/customer/AddressFormModal.jsx';
 import { OrderSummary, useCartValidation } from './Cart.jsx';
-import { PAYMENT_METHODS } from '../../utils/constants.js';
+import { PAYMENT_METHODS, isOnlinePayment } from '../../utils/constants.js';
+import { formatCurrency } from '../../utils/format.js';
+import useRazorpayPayment from '../../hooks/useRazorpayPayment.js';
 
 function Step({ number, title, icon: Icon, children }) {
   return (
@@ -34,6 +36,7 @@ export default function Checkout() {
   const toast = useToast();
   const navigate = useNavigate();
   const { result, loading: validating, error: validationError } = useCartValidation(true);
+  const { pay } = useRazorpayPayment();
 
   const addresses = useAsync(() => customerApi.addresses(), []);
   const [addressId, setAddressId] = useState(null);
@@ -55,25 +58,42 @@ export default function Checkout() {
   const phoneValid = /^[6-9][0-9]{9}$/.test(phone);
   const ready = result?.valid && addressId && phoneValid && !validating;
 
+  const online = isOnlinePayment(paymentMethod);
+
   const placeOrder = async () => {
     setPlaceError('');
     setPlacing(true);
+    let data;
     try {
-      const { data } = await customerApi.placeOrder({
+      ({ data } = await customerApi.placeOrder({
         shopId: cart.shop.id,
         addressId,
         items: cart.items.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
         paymentMethod,
         contactPhone: phone,
         notes: notes.trim() || null,
-      });
-      cart.clearCart();
-      toast.success('Order placed! The shop has been notified.');
-      navigate(`/orders/${data.id}`, { replace: true });
+      }));
     } catch (err) {
       setPlaceError(errorMessage(err, 'Could not place your order'));
       setPlacing(false);
+      return;
     }
+
+    // The order now exists (stock reserved), so the basket is done either way.
+    cart.clearCart();
+    if (!online) {
+      toast.success('Order placed! The shop has been notified.');
+      navigate(`/orders/${data.id}`, { replace: true });
+      return;
+    }
+
+    const result = await pay(data.id, paymentMethod);
+    if (result.outcome === 'paid') {
+      toast.success('Payment received! Your order has been sent to the shop.');
+    } else {
+      toast.error(`${result.message || 'Payment was not completed.'} You can retry from the order page.`);
+    }
+    navigate(`/orders/${data.id}`, { replace: true });
   };
 
   return (
@@ -160,6 +180,13 @@ export default function Checkout() {
                 </label>
               ))}
             </div>
+            {online && (
+              <p className="mt-3 flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+                You’ll pay securely on Razorpay right after placing the order. The shop receives your order once
+                the payment succeeds.
+              </p>
+            )}
           </Step>
         </div>
 
@@ -195,8 +222,8 @@ export default function Checkout() {
               </div>
             )}
 
-            <Button size="lg" className="mt-5 w-full" icon={CheckCircle2} loading={placing} disabled={!ready} onClick={placeOrder}>
-              Place order
+            <Button size="lg" className="mt-5 w-full" icon={online ? ShieldCheck : CheckCircle2} loading={placing} disabled={!ready} onClick={placeOrder}>
+              {online && result?.total != null ? `Place order & pay ${formatCurrency(result.total)}` : 'Place order'}
             </Button>
             {!addressId && addresses.data && <p className="mt-2 text-center text-xs text-slate-500">Add a delivery address to continue.</p>}
           </OrderSummary>

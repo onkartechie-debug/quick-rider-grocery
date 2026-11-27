@@ -76,6 +76,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage(), req, null);
     }
 
+    @ExceptionHandler(PaymentGatewayException.class)
+    public ResponseEntity<ApiError> handlePaymentGateway(PaymentGatewayException ex, HttpServletRequest req) {
+        log.error("Payment gateway error on {}: {}", req.getRequestURI(), ex.getMessage(), ex);
+        return build(HttpStatus.BAD_GATEWAY, "The payment gateway is unavailable right now. Please try again.", req, null);
+    }
+
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<ApiError> handleBadCredentials(BadCredentialsException ex, HttpServletRequest req) {
         return build(HttpStatus.UNAUTHORIZED, "Invalid email or password", req, null);

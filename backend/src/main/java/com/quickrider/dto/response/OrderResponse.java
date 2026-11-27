@@ -2,6 +2,7 @@ package com.quickrider.dto.response;
 
 import com.quickrider.entity.enums.OrderStatus;
 import com.quickrider.entity.enums.PaymentMethod;
+import com.quickrider.entity.enums.PaymentStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -24,6 +25,9 @@ public record OrderResponse(
         BigDecimal deliveryFee,
         BigDecimal totalAmount,
         PaymentMethod paymentMethod,
+        PaymentStatus paymentStatus,
+        String paymentFailureReason,
+        Instant paidAt,
         String notes,
         String cancelReason,
         int itemCount,

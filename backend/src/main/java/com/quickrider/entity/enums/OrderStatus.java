@@ -7,10 +7,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Order lifecycle: PLACED -> ACCEPTED -> PACKING -> OUT_FOR_DELIVERY -> DELIVERED.
- * CANCELLED is reachable from PLACED, ACCEPTED and PACKING.
+ * Order lifecycle: [AWAITING_PAYMENT ->] PLACED -> ACCEPTED -> PACKING -> OUT_FOR_DELIVERY -> DELIVERED.
+ * AWAITING_PAYMENT is only used for online (UPI/CARD) orders until the gateway confirms payment; such
+ * orders are invisible to the shop. CANCELLED is reachable from AWAITING_PAYMENT, PLACED, ACCEPTED and PACKING.
  */
 public enum OrderStatus {
+    AWAITING_PAYMENT,
     PLACED,
     ACCEPTED,
     PACKING,
@@ -21,6 +23,7 @@ public enum OrderStatus {
     private static final Map<OrderStatus, Set<OrderStatus>> TRANSITIONS = new EnumMap<>(OrderStatus.class);
 
     static {
+        TRANSITIONS.put(AWAITING_PAYMENT, EnumSet.of(PLACED, CANCELLED));
         TRANSITIONS.put(PLACED, EnumSet.of(ACCEPTED, CANCELLED));
         TRANSITIONS.put(ACCEPTED, EnumSet.of(PACKING, CANCELLED));
         TRANSITIONS.put(PACKING, EnumSet.of(OUT_FOR_DELIVERY, CANCELLED));

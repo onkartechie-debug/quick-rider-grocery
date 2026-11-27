@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import AuthShell from './AuthShell.jsx';
+import OtpLoginForm from './OtpLoginForm.jsx';
 import Button from '../../components/common/Button.jsx';
 import { TextInput } from '../../components/common/Fields.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
@@ -34,6 +35,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState('password');
 
   const update = (e) => setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
 
@@ -64,6 +66,30 @@ export default function Login() {
         </>
       }
     >
+      <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 text-sm font-semibold" role="tablist">
+        {[
+          ['password', 'Password'],
+          ['otp', 'Mobile OTP'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={mode === key}
+            onClick={() => {
+              setMode(key);
+              setError('');
+            }}
+            className={`rounded-lg py-2 transition ${mode === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'otp' ? (
+        <OtpLoginForm onLoggedIn={(user) => navigate(resolveDestination(location.state?.from, user.role), { replace: true })} />
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {error && (
           <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700" role="alert">
@@ -106,8 +132,9 @@ export default function Login() {
           Sign in
         </Button>
       </form>
+      )}
 
-      {DEMO_ACCOUNTS.length > 0 && (
+      {mode === 'password' && DEMO_ACCOUNTS.length > 0 && (
         <div className="mt-8 rounded-2xl border border-dashed border-slate-300 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Local demo accounts</p>
           <p className="mt-1 text-xs text-slate-500">Seeded by Flyway. Fills the email; password is in the seed file.</p>

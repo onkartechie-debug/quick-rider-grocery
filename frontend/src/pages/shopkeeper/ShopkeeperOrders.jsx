@@ -67,7 +67,18 @@ function OrderCard({ order, onAdvance, onCancel, busy }) {
       </ul>
 
       <div className="mt-2 flex items-center justify-between border-t border-dashed border-slate-200 pt-3 text-sm">
-        <span className="text-slate-500">{payment}</span>
+        <span className="flex items-center gap-2 text-slate-500">
+          {payment}
+          {order.paymentMethod !== 'COD' && order.paymentStatus === 'PAID' && (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Paid online</span>
+          )}
+          {order.paymentMethod === 'COD' && order.paymentStatus !== 'PAID' && order.status !== 'CANCELLED' && (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Collect cash</span>
+          )}
+          {order.paymentStatus === 'REFUND_PENDING' && (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Refund pending</span>
+          )}
+        </span>
         <span className="text-base font-bold text-slate-900">{formatCurrency(order.totalAmount)}</span>
       </div>
 

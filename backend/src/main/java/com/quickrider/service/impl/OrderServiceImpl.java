@@ -15,6 +15,9 @@ import com.quickrider.entity.Product;
 import com.quickrider.entity.Shop;
 import com.quickrider.entity.User;
 import com.quickrider.entity.enums.OrderStatus;
+import com.quickrider.entity.enums.PaymentMethod;
+import com.quickrider.entity.enums.PaymentStatus;
+import com.quickrider.event.OrderEvent;
 import com.quickrider.exception.BadRequestException;
 import com.quickrider.exception.ResourceNotFoundException;
 import com.quickrider.mapper.DtoMapper;
@@ -27,6 +30,8 @@ import com.quickrider.service.OrderService;
 import com.quickrider.service.ShopService;
 import com.quickrider.util.BusinessClock;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,11 +39,13 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +62,7 @@ public class OrderServiceImpl implements OrderService {
     private static final Map<OrderStatus, String> DEFAULT_NOTES = new EnumMap<>(OrderStatus.class);
 
     static {
+        DEFAULT_NOTES.put(OrderStatus.AWAITING_PAYMENT, "Waiting for online payment");
         DEFAULT_NOTES.put(OrderStatus.PLACED, "Order placed");
         DEFAULT_NOTES.put(OrderStatus.ACCEPTED, "Order accepted by shop");
         DEFAULT_NOTES.put(OrderStatus.PACKING, "Packing your items");
@@ -70,6 +78,7 @@ public class OrderServiceImpl implements OrderService {
     private final UserRepository userRepository;
     private final ShopService shopService;
     private final BusinessClock clock;
+    private final ApplicationEventPublisher events;
 
     // =====================================================================
     // Customer
@@ -186,10 +195,23 @@ public class OrderServiceImpl implements OrderService {
         order.setDeliveryFee(shop.getDeliveryFee());
         order.setTotalAmount(subtotal.add(shop.getDeliveryFee()));
         order.setPaymentMethod(request.paymentMethod());
+        order.setPaymentStatus(PaymentStatus.PENDING);
         order.setNotes(StringUtils.hasText(request.notes()) ? request.notes().trim() : null);
-        order.recordStatus(OrderStatus.PLACED, customer, DEFAULT_NOTES.get(OrderStatus.PLACED));
 
-        return DtoMapper.toOrder(orderRepository.save(order));
+        // Online (UPI/CARD) orders reserve stock but stay hidden from the shop until the gateway confirms
+        // payment (PaymentServiceImpl). COD orders go straight to the shop.
+        boolean online = request.paymentMethod().isOnline();
+        if (online) {
+            order.recordStatus(OrderStatus.AWAITING_PAYMENT, customer, DEFAULT_NOTES.get(OrderStatus.AWAITING_PAYMENT));
+        } else {
+            order.recordStatus(OrderStatus.PLACED, customer, DEFAULT_NOTES.get(OrderStatus.PLACED));
+        }
+
+        Order saved = orderRepository.save(order);
+        if (!online) {
+            events.publishEvent(OrderEvent.confirmed(saved.getId()));
+        }
+        return DtoMapper.toOrder(saved);
     }
 
     @Override
@@ -207,14 +229,15 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse cancelByCustomer(Long customerId, Long orderId, String reason) {
-        Order order = customerOwnedOrder(customerId, orderId);
-        if (order.getStatus() != OrderStatus.PLACED) {
+        // Locked: an in-flight payment confirmation for the same order must not interleave with this.
+        Order order = orderRepository.lockByIdAndCustomerId(orderId, customerId)
+                .orElseThrow(() -> ResourceNotFoundException.of("Order", orderId));
+        if (order.getStatus() != OrderStatus.PLACED && order.getStatus() != OrderStatus.AWAITING_PAYMENT) {
             throw new BadRequestException("This order can no longer be cancelled because the shop has already accepted it");
         }
         String note = StringUtils.hasText(reason) ? reason.trim() : "Cancelled by customer";
-        restoreStock(order);
-        order.setCancelReason(note);
-        order.recordStatus(OrderStatus.CANCELLED, userRepository.getReferenceById(customerId), note);
+        cancel(order, userRepository.getReferenceById(customerId), note);
+        events.publishEvent(OrderEvent.statusChanged(order.getId(), OrderStatus.CANCELLED));
         return DtoMapper.toOrder(order);
     }
 
@@ -226,10 +249,17 @@ public class OrderServiceImpl implements OrderService {
     @Transactional(readOnly = true)
     public PageResponse<OrderResponse> shopOrders(Long ownerId, Collection<OrderStatus> statuses, Pageable pageable) {
         Shop shop = shopService.requireShopOfOwner(ownerId);
-        var page = (statuses == null || statuses.isEmpty())
-                ? orderRepository.findByShopId(shop.getId(), pageable)
-                : orderRepository.findByShopIdAndStatusIn(shop.getId(), statuses, pageable);
-        return PageResponse.of(page, DtoMapper::toOrder);
+        if (statuses == null || statuses.isEmpty()) {
+            return PageResponse.of(orderRepository.findByShopIdAndStatusNot(shop.getId(), OrderStatus.AWAITING_PAYMENT,
+                    pageable), DtoMapper::toOrder);
+        }
+        EnumSet<OrderStatus> visible = EnumSet.copyOf(statuses);
+        visible.remove(OrderStatus.AWAITING_PAYMENT);
+        if (visible.isEmpty()) {
+            return PageResponse.of(Page.<Order>empty(pageable), DtoMapper::toOrder);
+        }
+        return PageResponse.of(orderRepository.findByShopIdAndStatusIn(shop.getId(), visible, pageable),
+                DtoMapper::toOrder);
     }
 
     @Override
@@ -247,16 +277,35 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("Cannot move order from " + order.getStatus() + " to " + target);
         }
         String note = StringUtils.hasText(request.note()) ? request.note().trim() : null;
+        User owner = userRepository.getReferenceById(ownerId);
         if (target == OrderStatus.CANCELLED) {
             if (note == null) {
                 throw new BadRequestException("Please provide a reason for cancelling the order");
             }
-            restoreStock(order);
-            order.setCancelReason(note);
+            cancel(order, owner, note);
+        } else {
+            if (target == OrderStatus.DELIVERED && order.getPaymentMethod() == PaymentMethod.COD) {
+                // Cash collected by the rider on delivery.
+                order.setPaymentStatus(PaymentStatus.PAID);
+                order.setPaidAt(Instant.now());
+            }
+            order.recordStatus(target, owner, note != null ? note : DEFAULT_NOTES.get(target));
         }
-        order.recordStatus(target, userRepository.getReferenceById(ownerId),
-                note != null ? note : DEFAULT_NOTES.get(target));
+        events.publishEvent(OrderEvent.statusChanged(order.getId(), target));
         return DtoMapper.toOrder(order);
+    }
+
+    /**
+     * Cancels an order and returns its reserved stock. An order that was already paid online is flagged
+     * REFUND_PENDING - refund it from the Razorpay dashboard. Shared with PaymentServiceImpl (expiry).
+     */
+    static void cancel(Order order, User changedBy, String reason) {
+        restoreStock(order);
+        order.setCancelReason(reason);
+        if (order.getPaymentStatus() == PaymentStatus.PAID && order.getPaymentMethod().isOnline()) {
+            order.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+        }
+        order.recordStatus(OrderStatus.CANCELLED, changedBy, reason);
     }
 
     // =====================================================================
@@ -270,7 +319,7 @@ public class OrderServiceImpl implements OrderService {
 
     private Order shopOwnedOrder(Long ownerId, Long orderId) {
         Shop shop = shopService.requireShopOfOwner(ownerId);
-        return orderRepository.findByIdAndShopId(orderId, shop.getId())
+        return orderRepository.findByIdAndShopIdAndStatusNot(orderId, shop.getId(), OrderStatus.AWAITING_PAYMENT)
                 .orElseThrow(() -> ResourceNotFoundException.of("Order", orderId));
     }
 
@@ -298,7 +347,7 @@ public class OrderServiceImpl implements OrderService {
         return null;
     }
 
-    private static void restoreStock(Order order) {
+    static void restoreStock(Order order) {
         for (OrderItem item : order.getItems()) {
             Product product = item.getProduct();
             if (product != null) {

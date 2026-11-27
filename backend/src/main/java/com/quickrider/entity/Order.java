@@ -2,6 +2,7 @@ package com.quickrider.entity;
 
 import com.quickrider.entity.enums.OrderStatus;
 import com.quickrider.entity.enums.PaymentMethod;
+import com.quickrider.entity.enums.PaymentStatus;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -79,6 +80,23 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_method", nullable = false, length = 20)
     private PaymentMethod paymentMethod = PaymentMethod.COD;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_status", nullable = false, length = 20)
+    private PaymentStatus paymentStatus = PaymentStatus.PENDING;
+
+    /** Razorpay order created for this order (online payments only); reused for every retry. */
+    @Column(name = "razorpay_order_id", length = 40)
+    private String razorpayOrderId;
+
+    @Column(name = "razorpay_payment_id", length = 40)
+    private String razorpayPaymentId;
+
+    @Column(name = "payment_failure_reason", length = 255)
+    private String paymentFailureReason;
+
+    @Column(name = "paid_at")
+    private Instant paidAt;
 
     @Column(length = 300)
     private String notes;

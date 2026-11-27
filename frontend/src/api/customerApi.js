@@ -15,6 +15,10 @@ export const customerApi = {
   orders: (params) => api.get('/customer/orders', { params }),
   order: (orderId) => api.get(`/customer/orders/${orderId}`),
   cancelOrder: (orderId, reason) => api.post(`/customer/orders/${orderId}/cancel`, { reason }),
+  // Razorpay online payment (UPI/CARD orders in AWAITING_PAYMENT)
+  startPayment: (orderId) => api.post(`/customer/orders/${orderId}/payment`),
+  verifyPayment: (orderId, payload) => api.post(`/customer/orders/${orderId}/payment/verify`, payload),
+  paymentFailed: (orderId, payload) => api.post(`/customer/orders/${orderId}/payment/failure`, payload),
   addresses: () => api.get('/customer/addresses'),
   createAddress: (payload) => api.post('/customer/addresses', payload),
   updateAddress: (addressId, payload) => api.put(`/customer/addresses/${addressId}`, payload),

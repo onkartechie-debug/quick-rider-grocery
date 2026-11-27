@@ -12,6 +12,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmailIgnoreCase(String email);
 
+    /** Phone is not unique in the schema; OTP login only proceeds when exactly one account matches. */
+    List<User> findByPhone(String phone);
+
     boolean existsByEmailIgnoreCase(String email);
 
     long countByRole(Role role);

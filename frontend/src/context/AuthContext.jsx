@@ -43,6 +43,19 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
+  const requestOtp = useCallback(async (phone) => {
+    await ensureCsrf();
+    const { data } = await authApi.requestOtp(phone);
+    return data;
+  }, []);
+
+  const loginWithOtp = useCallback(async (phone, otp) => {
+    await ensureCsrf();
+    const { data } = await authApi.verifyOtp(phone, otp);
+    setUser(data);
+    return data;
+  }, []);
+
   const register = useCallback(async (payload) => {
     await ensureCsrf();
     const { data } = await authApi.register(payload);
@@ -60,8 +73,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, isAuthenticated: !!user, login, register, logout }),
-    [user, loading, login, register, logout],
+    () => ({ user, loading, isAuthenticated: !!user, login, requestOtp, loginWithOtp, register, logout }),
+    [user, loading, login, requestOtp, loginWithOtp, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

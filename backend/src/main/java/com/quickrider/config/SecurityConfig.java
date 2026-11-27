@@ -34,6 +34,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    private static final String RAZORPAY_WEBHOOK = "/api/public/payments/razorpay/webhook";
+
     private final JwtCookieAuthenticationFilter jwtCookieAuthenticationFilter;
     private final JsonAuthHandlers jsonAuthHandlers;
     private final SecurityProperties properties;
@@ -50,7 +52,9 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfRepository)
-                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler()))
+                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
+                        // Server-to-server from Razorpay: no browser, no cookies; authenticated by HMAC signature.
+                        .ignoringRequestMatchers(RAZORPAY_WEBHOOK))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -68,8 +72,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info", "/error").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register", "/api/auth/logout").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register", "/api/auth/logout",
+                                "/api/auth/otp/request", "/api/auth/otp/verify").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, RAZORPAY_WEBHOOK).permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/shopkeeper/**").hasRole("SHOPKEEPER")
                         .requestMatchers("/api/customer/**").hasRole("CUSTOMER")
